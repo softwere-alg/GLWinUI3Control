@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Sample.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Sample"
+    xmlns:glcontrol="using:GLWinUI3Control"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid>
+        <UserControl Margin="10, 10, 10, 10" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" >
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <glcontrol:GLWinUI3ControlRL x:Name="glControl1" Grid.Row="0" Grid.Column="0" Background="Red"/>
+                <glcontrol:GLWinUI3ControlRL x:Name="glControl2" Grid.Row="0" Grid.Column="1" Background="Green"/>
+                <glcontrol:GLWinUI3Control x:Name="glControl3" Grid.Row="1" Grid.Column="0" Background="Blue"/>
+                <StackPanel Grid.Row="1" Grid.Column="1">
+                    <Button Grid.Column="0" Click="mainButton_Click">Main</Button>
+                    <Button Grid.Column="0" Click="invokeButton_Click">Invoke</Button>
+                </StackPanel>
+            </Grid>
+        </UserControl>
+    </Grid>
+</Window>

@@ -1,0 +1,25 @@
+#version 430 core
+
+layout(std430, binding = 0) buffer A
+{
+    float a[];
+};
+
+layout(std430, binding = 1) buffer B
+{
+    float b[];
+};
+
+layout(std430, binding = 2) buffer C
+{
+    float c[];
+};
+
+layout(local_size_x = 1000, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    float _a = a[gl_GlobalInvocationID.x];
+    float _b = b[gl_GlobalInvocationID.x];
+
+    c[gl_GlobalInvocationID.x] = _a + _b;
+}

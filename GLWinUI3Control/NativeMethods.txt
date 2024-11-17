@@ -1,0 +1,22 @@
+// function
+CreateWindowEx
+DestroyWindow
+SetLayeredWindowAttributes
+ShowWindow
+MoveWindow
+SetParent
+//SetWindowLongPtr
+GetScaleFactorForDevice
+timeBeginPeriod
+SetThreadAffinityMask
+SetThreadAffinityMask
+GetProcessAffinityMask
+GetCurrentThread
+GetCurrentProcess
+
+// enum
+WINDOW_EX_STYLE
+WINDOW_STYLE
+LAYERED_WINDOW_ATTRIBUTES_FLAGS
+SHOW_WINDOW_CMD
+WINDOW_LONG_PTR_INDEX
