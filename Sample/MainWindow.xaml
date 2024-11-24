@@ -22,9 +22,9 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <glcontrol:GLWinUI3ControlRL x:Name="glControl1" Grid.Row="0" Grid.Column="0" Background="Red"/>
-                <glcontrol:GLWinUI3ControlRL x:Name="glControl2" Grid.Row="0" Grid.Column="1" Background="Green"/>
-                <glcontrol:GLWinUI3Control x:Name="glControl3" Grid.Row="1" Grid.Column="0" Background="Blue"/>
+                <glcontrol:GLWinUI3ControlRL x:Name="glControl1" Grid.Row="0" Grid.Column="0" ClearColor="Red"/>
+                <glcontrol:GLWinUI3ControlRL x:Name="glControl2" Grid.Row="0" Grid.Column="1" ClearColor="Green"/>
+                <glcontrol:GLWinUI3Control x:Name="glControl3" Grid.Row="1" Grid.Column="0" ClearColor="Blue"/>
                 <StackPanel Grid.Row="1" Grid.Column="1">
                     <Button Grid.Column="0" Click="mainButton_Click">Main</Button>
                     <Button Grid.Column="0" Click="invokeButton_Click">Invoke</Button>

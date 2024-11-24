@@ -1,22 +1,32 @@
-﻿using Microsoft.UI;
+﻿using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
-using OpenTK.Windowing.Desktop;
-using OpenTK.Windowing.GraphicsLibraryFramework;
 using System;
 using System.Diagnostics;
-using Windows.Foundation;
-using Windows.Win32;
-using Windows.Win32.Foundation;
-using Windows.Win32.UI.Shell;
-using Windows.Win32.UI.Shell.Common;
-using Windows.Win32.UI.WindowsAndMessaging;
+using System.Runtime.InteropServices;
+using Windows.UI;
 
 namespace GLWinUI3Control
 {
-    public class GLWinUI3Control : Control, IDisposable
+    public sealed partial class GLWinUI3Control : UserControl, IDisposable
     {
+        private class ImageData
+        {
+            public byte[] Data { get; }
+            public int Width { get; }
+            public int Height { get; }
+
+            public ImageData(byte[] data, int width, int height)
+            {
+                Data = data;
+                Width = width;
+                Height = height;
+            }
+        }
+
         #region イベント
         /// <summary>
         /// コントロールの初期化完了時に発生します。
@@ -28,7 +38,7 @@ namespace GLWinUI3Control
         /// <summary>
         /// コントロールの初期化完了時に実行します。
         /// </summary>
-        protected void OnInitialized()
+        private void OnInitialized()
         {
             Initialized?.Invoke();
         }
@@ -64,7 +74,7 @@ namespace GLWinUI3Control
         {
             CreateControl();
 
-            Initialize();
+            OnInitialized();
         }
 
         /// <summary>
@@ -76,22 +86,45 @@ namespace GLWinUI3Control
         {
             DestroyControl(true);
         }
+
+        /// <summary>
+        /// canvasの描画更新時に呼ばれます。
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="args"></param>
+        private void CanvasControl_Draw(CanvasControl sender, CanvasDrawEventArgs args)
+        {
+            CanvasBitmap bitmap;
+            lock (_lock)
+            {
+                if (_imageData != null)
+                {
+                    bitmap = CanvasBitmap.CreateFromBytes(canvas.Device, _imageData.Data, _imageData.Width, _imageData.Height, Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized);
+                }
+                else
+                {
+                    return;
+                }
+            }
+            args.DrawingSession.DrawImage(bitmap);
+        }
         #endregion
 
         #region メンバ変数
         /// <summary>
         /// GL Context
         /// </summary>
-        protected GLWinUI3Context? _glContext;
+        private GLWinUI3Context? _glContext;
+
         /// <summary>
         /// このコントロールを設定を保持します。
         /// </summary>
         private GLWinUI3ControlSettings _settings;
 
         /// <summary>
-        /// Win32 Windowのハンドルを保持します。
+        /// 画面クリア時の色を定義します。
         /// </summary>
-        private HWND _win32Window = HWND.Null;
+        private Color _clearColor;
 
         /// <summary>
         /// 描画可能領域を定義します。
@@ -101,12 +134,32 @@ namespace GLWinUI3Control
         /// <summary>
         /// Disposeが呼ばれたかを表します。
         /// </summary>
-        protected bool _isDisposed = false;
+        private bool _isDisposed = false;
 
         /// <summary>
         /// 初期化済みかを表します。
         /// </summary>
         private bool _initialized = false;
+
+        /// <summary>
+        /// 作業領域を定義します。
+        /// </summary>
+        private IntPtr _tmpBuf = IntPtr.Zero;
+
+        /// <summary>
+        /// 作業領域の確保済みのサイズを定義します。
+        /// </summary>
+        private int _allocedSize = 0;
+
+        /// <summary>
+        /// 表示データを定義します。
+        /// </summary>
+        private ImageData? _imageData;
+
+        /// <summary>
+        /// ロックオブジェクトを定義します。
+        /// </summary>
+        private object _lock = new object();
         #endregion
 
         #region プロパティ
@@ -114,6 +167,22 @@ namespace GLWinUI3Control
         /// 描画可能領域を取得します。
         /// </summary>
         public Box2i DrawableArea { get => _drawableArea; }
+
+        /// <summary>
+        /// 画面クリア時の色を設定取得します。
+        /// </summary>
+        public Color ClearColor
+        {
+            get
+            {
+                return _clearColor;
+            }
+            set
+            {
+                _clearColor = value;
+                canvas.ClearColor = _clearColor;
+            }
+        }
         #endregion
 
         #region コンストラクタ
@@ -123,7 +192,7 @@ namespace GLWinUI3Control
 
         public GLWinUI3Control(GLWinUI3ControlSettings? settings = null)
         {
-            this.DefaultStyleKey = typeof(GLWinUI3Control);
+            this.InitializeComponent();
 
             this._settings = settings ?? new GLWinUI3ControlSettings();
 
@@ -131,6 +200,7 @@ namespace GLWinUI3Control
             this.Unloaded += GLWinUI3Control_Unloaded;
             this.SizeChanged += GLWinUI3Control_SizeChanged;
             this.LayoutUpdated += GLWinUI3Control_LayoutUpdated;
+            this.canvas.Draw += CanvasControl_Draw;
         }
 
         ~GLWinUI3Control()
@@ -138,7 +208,7 @@ namespace GLWinUI3Control
             Dispose(false);
         }
 
-        protected virtual unsafe void Dispose(bool disposing)
+        private unsafe void Dispose(bool disposing)
         {
             if (_isDisposed)
             {
@@ -150,6 +220,11 @@ namespace GLWinUI3Control
             }
 
             DestroyControl(disposing);
+            if (_tmpBuf != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(_tmpBuf);
+                _allocedSize = 0;
+            }
 
             _isDisposed = true;
         }
@@ -191,22 +266,74 @@ namespace GLWinUI3Control
         /// <summary>
         /// 
         /// </summary>
-        public void SwapBuffers()
+        public unsafe void SwapBuffers()
+        {
+            if (GetImageData())
+            {
+                canvas.Invalidate();
+            }
+        }
+
+        /// <summary>
+        /// OpenGLのレンダリング結果を取得します。
+        /// </summary>
+        /// <returns>成否</returns>
+        private bool GetImageData()
         {
             if (_glContext == null)
             {
                 Trace.WriteLine("ERROR: _glContext is null");
-                return;
+                return false;
             }
-            _glContext.NativeWindow.Context.SwapBuffers();
-        }
 
-        /// <summary>
-        /// 初期化処理を行います。
-        /// </summary>
-        protected virtual void Initialize()
-        {
-            OnInitialized();
+            int[] dims = new int[4];
+            GL.GetInteger(GetPName.Viewport, dims);
+            int width = dims[2];
+            int height = dims[3];
+            int requestSize = 4 * width * height;
+
+            // 作業領域の確保
+            if (requestSize != _allocedSize)
+            {
+                if (_tmpBuf != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_tmpBuf);
+                }
+
+                _tmpBuf = Marshal.AllocHGlobal(requestSize);
+                _allocedSize = requestSize;
+            }
+
+            // OpenGLのレンダリング結果を読み取る
+            GL.ReadBuffer(ReadBufferMode.BackLeft);
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedInt8888, _tmpBuf);
+
+            lock (_lock)
+            {
+                byte[] imageBytes;
+                if (_imageData == null || 4 * _imageData.Width * _imageData.Height != requestSize)
+                {
+                    imageBytes = new byte[requestSize];
+                }
+                else
+                {
+                    imageBytes = _imageData.Data;
+                }
+
+                Marshal.Copy(_tmpBuf, imageBytes, 0, requestSize);
+
+                // ABGRの並びをBGRAに変換する
+                for (int i = 0; i < 4 * width * height; i += 4)
+                {
+                    byte a = imageBytes[i];
+                    Array.Copy(imageBytes, i + 1, imageBytes, i, 3);
+                    imageBytes[i + 3] = a;
+                }
+
+                _imageData = new ImageData(imageBytes, width, height);
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -214,26 +341,12 @@ namespace GLWinUI3Control
         /// </summary>
         /// <remarks>
         /// 描画エリアはOpenTKのNativeWindowを使用する
-        /// NativeWindowをUIElement上に配置するため、次の手順を行う
-        /// 1. Win32APIを使用して、Windowを作成し、UIElement上に配置する
-        ///     (正確には、UIElementで確保しているスペースを覆い隠すようにWindowのサイズと配置を調整して、実現している)
-        /// 2. NativeWindowを作成し、Windowを親にする
+        /// NativeWindowは非表示にして、オフスクリーンの結果をcanvasに描画する
         /// </remarks>
-        /// <exception cref="NotSupportedException"></exception>
         private void CreateControl()
         {
             if (!_initialized)
             {
-                HWND hWnd = GetWindowHandle();
-                if (hWnd.IsNull)
-                {
-                    throw new NotSupportedException();
-                }
-
-                // 1.
-                CreateWindowEx(hWnd);
-
-                // 2.
                 CreateNativeWindow();
 
                 _initialized = true;
@@ -253,34 +366,9 @@ namespace GLWinUI3Control
                 _initialized = false;
 
                 DestroyNativeWindow(disposing);
-                DestroyWindowEx();
-            }
-        }
 
-        /// <summary>
-        /// Win32APIを使用したWindowを作成します。
-        /// </summary>
-        /// <param name="hWnd">親になるウィンドウハンドル</param>
-        private unsafe void CreateWindowEx(HWND hWnd)
-        {
-            const int opacity = 100;
-
-            _win32Window = PInvoke.CreateWindowEx(WINDOW_EX_STYLE.WS_EX_TRANSPARENT | WINDOW_EX_STYLE.WS_EX_LAYERED, "Static", "", WINDOW_STYLE.WS_VISIBLE | WINDOW_STYLE.WS_CHILD, 0, 0, 100, 100, hWnd, null, null, null);
-
-            PInvoke.SetLayeredWindowAttributes(_win32Window, new COLORREF(0), (byte)(255 * opacity / 100), LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA).ToString();
-
-            PInvoke.ShowWindow(_win32Window, SHOW_WINDOW_CMD.SW_SHOWNORMAL).ToString();
-        }
-
-        /// <summary>
-        /// Windowを破棄します。
-        /// </summary>
-        private void DestroyWindowEx()
-        {
-            if (!_win32Window.IsNull)
-            {
-                PInvoke.DestroyWindow(_win32Window);
-                _win32Window = HWND.Null;
+                canvas.RemoveFromVisualTree();
+                canvas = null;
             }
         }
 
@@ -290,11 +378,6 @@ namespace GLWinUI3Control
         private void CreateNativeWindow()
         {
             _glContext = new GLWinUI3Context(_settings);
-
-            SetParent(_glContext.NativeWindow);
-
-            // And now show the child window, since it hasn't been made visible yet.
-            _glContext.NativeWindow.IsVisible = true;
         }
 
         /// <summary>
@@ -311,50 +394,6 @@ namespace GLWinUI3Control
         }
 
         /// <summary>
-        /// NativeWindowの親をWindowに設定します。
-        /// </summary>
-        /// <param name="nativeWindow">The NativeWindow that must become a child of win32window.</param>
-        private unsafe void SetParent(NativeWindow nativeWindow)
-        {
-            HWND hWnd = new HWND(GLFW.GetWin32Window(nativeWindow.WindowPtr));
-
-            // Reparent the real HWND under win32window.
-            PInvoke.SetParent(hWnd, _win32Window);
-
-            // Change the real HWND's window styles to be "WS_CHILD | WS_DISABLED" (i.e.,
-            // a child of some container, with no input support), and turn off *all* the
-            // other style bits (most of the rest of them could cause trouble).  In
-            // particular, this turns off stuff like WS_BORDER and WS_CAPTION and WS_POPUP
-            // and so on, any of which GLFW might have turned on for us.
-            IntPtr style = (IntPtr)(long)(WINDOW_STYLE.WS_CHILD | WINDOW_STYLE.WS_DISABLED);
-            PInvoke.SetWindowLongPtr(hWnd, WINDOW_LONG_PTR_INDEX.GWL_STYLE, style);
-
-            // Change the real HWND's extended window styles to be "WS_EX_NOACTIVATE", and
-            // turn off *all* the other extended style bits (most of the rest of them
-            // could cause trouble).  We want WS_EX_NOACTIVATE because we don't want
-            // Windows mistakenly giving the GLFW window the focus as soon as it's created,
-            // regardless of whether it's a hidden window.
-            style = (IntPtr)(long)WINDOW_EX_STYLE.WS_EX_NOACTIVATE;
-            PInvoke.SetWindowLongPtr(hWnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, style);
-        }
-
-        /// <summary>
-        /// このコントロールに紐づくウィンドウハンドルを取得します。
-        /// https://stackoverflow.com/questions/74273875/retrive-window-handle-in-class-library-winui3
-        /// </summary>
-        /// <returns>ウィンドウハンドル</returns>
-        private HWND GetWindowHandle()
-        {
-            var windowId = this.XamlRoot?.ContentIslandEnvironment?.AppWindowId;
-            if (!windowId.HasValue)
-            {
-                return HWND.Null;
-            }
-
-            return new HWND(Win32Interop.GetWindowFromWindowId(windowId.Value));
-        }
-
-        /// <summary>
         /// サイズやレイアウト変更に伴うウィンドウの更新を行います。
         /// </summary>
         private void UpdateWindowLayout()
@@ -364,21 +403,7 @@ namespace GLWinUI3Control
                 return;
             }
 
-            // 最上位のFrameElementを取得(多くの場合、MainWindow.xaml直下のコントロール)
-            FrameworkElement? element = this.Parent as FrameworkElement;
-            FrameworkElement? oldElement = null;
-            while (element != null)
-            {
-                oldElement = element;
-                element = element.Parent as FrameworkElement;
-            }
-
-            // 最上位のFrameElementに対するこのコントロールの相対座標を取得
-            Point pos = TransformToVisual(oldElement).TransformPoint(new Point(0, 0));
-
-            // プライマリモニターの拡大率を取得
-            DEVICE_SCALE_FACTOR scaleFactor = PInvoke.GetScaleFactorForDevice(DISPLAY_DEVICE_TYPE.DEVICE_PRIMARY);
-            double scale = (int)scaleFactor / 100.0;
+            double scale = 1.0;
 
             // 描画可能範囲を計算
             // 計算結果を切り捨てると、コントロール表示に空洞ができてしまうため、四捨五入する
@@ -391,9 +416,6 @@ namespace GLWinUI3Control
             {
                 Trace.WriteLine("ERROR: _glContext is null");
             }
-
-            // _win32Windowのサイズと位置をこのコントロールのサイズと位置に合わせる
-            PInvoke.MoveWindow(_win32Window, (int)Math.Round(pos.X * scale), (int)Math.Round(pos.Y * scale), (int)Math.Round(this.ActualWidth * scale), (int)Math.Round(this.ActualHeight * scale), false);
         }
         #endregion
     }
